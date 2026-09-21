@@ -1,0 +1,12 @@
+[Unit]
+Description=Legion fan auto profile switcher (max/normal by CPU temp)
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/legion-fan-auto.sh
+Restart=on-failure
+RestartSec=5
+
+# Sin [Install]: no debe arrancar solo en boot ni quedar habilitado.
+# Se activa manualmente con: sudo systemctl start legion-fan-auto.service
