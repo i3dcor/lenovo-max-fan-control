@@ -12,6 +12,7 @@ Probado en CachyOS (Arch) con kernel 7.2.4-3-cachyos, BIOS GKCN65WW, vía el mó
 |---|---|---|
 | `legion-fan-auto.sh` | `/usr/local/bin/legion-fan-auto.sh` | Loop que lee la temperatura de CPU y GPU y cambia de perfil |
 | `legion-fan-auto.service` | `/etc/systemd/system/legion-fan-auto.service` | Unit de systemd que mantiene el script corriendo |
+| `legion-fan-auto-sleep-hook.sh` | `/usr/lib/systemd/system-sleep/legion-fan-auto` | Devuelve el EC a `balanced` y para el daemon antes de suspender |
 | `max-fan.yaml` | `/etc/legion_linux/max-fan.yaml` | Curva de ventilador fija a 4500 RPM (techo real de hardware de este modelo) en todos los puntos de temperatura |
 
 ## Requisitos previos
@@ -34,6 +35,7 @@ Probado en CachyOS (Arch) con kernel 7.2.4-3-cachyos, BIOS GKCN65WW, vía el mó
 sudo install -m 644 -D max-fan.yaml /etc/legion_linux/max-fan.yaml
 sudo install -m 755 legion-fan-auto.sh /usr/local/bin/legion-fan-auto.sh
 sudo install -m 644 legion-fan-auto.service /etc/systemd/system/legion-fan-auto.service
+sudo install -m 755 legion-fan-auto-sleep-hook.sh /usr/lib/systemd/system-sleep/legion-fan-auto
 sudo systemctl daemon-reload
 ```
 
@@ -130,9 +132,26 @@ sudo legion_cli set-feature PlatformProfileFeature balanced
   unidad, no el máximo alcanzable por el hardware).
 - No dejar el modo máximo corriendo permanentemente sin necesidad: acelera el
   desgaste de los ventiladores.
-- Mantener `platform_profile=custom` de forma continua (piso de RPM forzado)
-  causó apagados espontáneos en este equipo; por eso el modo normal usa
-  `balanced` y deja el control al firmware.
+- **Escribir `platform_profile` después de un resume de S3 apaga el equipo en
+  seco.** Es la causa real de los apagados espontáneos, no la curva ni el piso
+  de RPM. Evidencia en el journal: las 6 escrituras del boot `-2` previas a
+  cualquier suspend fueron inocuas, mientras que las dos únicas escrituras
+  posteriores a un resume mataron la máquina a los 1.1 s y a los 40 ms
+  respectivamente, sin secuencia de shutdown, sin MCE y sin thermal critical.
+  El último registro antes del corte es siempre `kernel: legion_laptop: Set
+  powermode`.
+
+  Dos defensas en el código, no quitar ninguna:
+  1. `write_profile()` lee `/sys/firmware/acpi/platform_profile` y no escribe
+     si el perfil ya es el deseado. Una escritura redundante **no** es un
+     no-op a nivel de EC: es la que mataba el equipo al arrancar el servicio.
+  2. El hook de `systemd-sleep` vuelve a `balanced` mientras todavía es seguro
+     escribir (antes de S3) y para el daemon. **No** se rearranca solo al
+     despertar; hay que arrancarlo a mano, idealmente tras reiniciar.
+
+  `legion_cli set-feature PlatformProfileFeature` escribe en
+  `.../platform-profile-N/profile` del driver, o sea el mismo camino EC/WMI que
+  el sysfs del kernel: cambiar de interfaz no evita el problema.
 - Cambiar a `platform_profile=custom` resetea momentáneamente la curva en el
   EC; escribir la curva sin pausa justo después dejaba filas a medias (el
   ventilador se quedaba en ~3000 RPM en vez de 4500). Por eso `set_max()`

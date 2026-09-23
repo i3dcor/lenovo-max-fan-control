@@ -5,24 +5,40 @@ HWMON=$(dirname "$(grep -l legion_hwmon /sys/class/hwmon/hwmon*/name)")
 CPU_TEMP_FILE="$HWMON/temp1_input"
 GPU_TEMP_FILE="$HWMON/temp2_input"
 MAX_CURVE="/etc/legion_linux/max-fan.yaml"
+PROFILE_FILE="/sys/firmware/acpi/platform_profile"
 TEMP_ON=66000
 TEMP_OFF=55000
 POLL_INTERVAL=5
 
-state=""
+# Writing the platform profile goes straight to the EC through legion_laptop.
+# A redundant write is not a no-op at that level: after an S3 resume it has
+# hard-powered the machine off within milliseconds. Never write a profile the
+# EC already reports.
+write_profile() {
+	local target=$1
+	if [[ "$(cat "$PROFILE_FILE")" == "$target" ]]; then
+		return 1
+	fi
+	legion_cli set-feature PlatformProfileFeature "$target" >/dev/null
+	return 0
+}
 
 set_max() {
-	legion_cli set-feature PlatformProfileFeature custom >/dev/null
-	# el cambio a custom resetea momentáneamente la curva en el EC; sin esta
-	# pausa la escritura siguiente llega a medias (algunas filas quedan en 0)
-	sleep 1
+	if write_profile custom; then
+		# switching to custom momentarily resets the curve in the EC; without
+		# this pause the next write lands half-applied (some rows stay at 0)
+		sleep 1
+	fi
 	legion_cli fancurve-write-file-to-hw "$MAX_CURVE" >/dev/null
 	logger -t legion-fan-auto "switched to MAX mode"
 }
 
 set_normal() {
-	legion_cli set-feature PlatformProfileFeature balanced >/dev/null
-	logger -t legion-fan-auto "switched to NORMAL mode (firmware control)"
+	if write_profile balanced; then
+		logger -t legion-fan-auto "switched to NORMAL mode (firmware control)"
+	else
+		logger -t legion-fan-auto "already in NORMAL mode, no EC write"
+	fi
 }
 
 set_normal
