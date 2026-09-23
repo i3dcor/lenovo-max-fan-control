@@ -6,21 +6,27 @@ deben revertirse sin que el usuario lo pida de nuevo.
 
 ## Norma: umbrales de temperatura y lógica de disparo (CPU/GPU)
 
-- **Límite superior (activa modo max): 66°C.**
-- **Límite inferior (vuelve a modo normal): 55°C.**
+- **Cada sensor tiene sus propios límites** (decisión del usuario, 2026-09-23):
+
+  | Sensor | Activa modo max | Vuelve a modo normal |
+  |---|---|---|
+  | CPU | > 70°C | < 62°C |
+  | GPU | > 64°C | < 60°C |
+
 - El chequeo de temperatura se hace **tanto en CPU como en GPU**.
 - **Subir a modo max**: alcanza con que **una sola** de las dos temperaturas
-  (CPU o GPU) supere los 66°C. No hace falta que ambas lo superen.
-- **Bajar a modo normal**: se requiere que **las dos** temperaturas (CPU y
-  GPU) estén por debajo de 55°C al mismo tiempo. Si una sola sigue por
-  encima de 55°C, el modo max se mantiene.
+  supere **su** límite superior. No hace falta que ambas lo superen.
+- **Bajar a modo normal**: se requiere que **las dos** temperaturas estén por
+  debajo de **su** límite inferior al mismo tiempo. Si una sola sigue por
+  encima, el modo max se mantiene.
+- Las comparaciones son estrictas (`-gt` para subir, `-lt` para bajar).
 - Esta asimetría (OR para subir, AND para bajar) es intencional: prioriza
   evitar sobrecalentamiento por sobre evitar ruido, y evita que el modo
   oscile (histéresis) cuando una sola temperatura fluctúa cerca del límite.
 
-Implementado en `legion-fan-auto.sh` mediante `TEMP_ON=66000` / `TEMP_OFF=55000`
-(miligrados) y lectura de `temp1_input` (CPU) y `temp2_input` (GPU) del hwmon
-`legion_hwmon`.
+Implementado en `legion-fan-auto.sh` mediante `CPU_TEMP_ON` / `GPU_TEMP_ON` /
+`CPU_TEMP_OFF` / `GPU_TEMP_OFF` (miligrados) y lectura de `temp1_input` (CPU) y
+`temp2_input` (GPU) del hwmon `legion_hwmon`.
 
 ## Norma: el EC se queda siempre en `custom` (2026-09-23)
 

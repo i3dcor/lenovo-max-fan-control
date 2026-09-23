@@ -54,22 +54,24 @@ en miligrados).
 - **Al arrancar el daemon** → escribe `platform_profile=custom` **una sola
   vez** y carga `normal-fan.yaml`. A partir de ahí el perfil no se vuelve a
   tocar nunca (ver `## Notas / limitaciones`).
-- **CPU ≥ 66°C O GPU ≥ 66°C** → modo **max**: basta con que una sola de las
-  dos temperaturas supere el límite superior para que ambos ventiladores
-  pasen a `max-fan.yaml` (4500 RPM fijo en todo el rango).
-- **CPU ≤ 55°C Y GPU ≤ 55°C** (viniendo de modo max) → vuelve a modo
+- **CPU > 70°C O GPU > 64°C** → modo **max**: basta con que una sola de las
+  dos temperaturas supere su límite superior para que ambos ventiladores
+  pasen a `max-fan.yaml` (4500 RPM fijo en todo el rango). Cada sensor tiene
+  su propio límite.
+- **CPU < 62°C Y GPU < 60°C** (viniendo de modo max) → vuelve a modo
   **normal** recargando `normal-fan.yaml`. Se necesita que **ambas**
-  temperaturas bajen del límite inferior; si una sola sigue por encima de
-  55°C, el modo max se mantiene.
-- Entre 55°C y 66°C (para la temperatura que disparó el cambio) se mantiene
-  el modo activo (histéresis, evita que el ventilador oscile entre modos).
+  temperaturas bajen de su límite inferior; si una sola sigue por encima, el
+  modo max se mantiene.
+- Dentro de la banda de histéresis de cada sensor (62-70°C en CPU, 60-64°C en
+  GPU) se mantiene el modo activo, lo que evita que el ventilador oscile
+  entre modos cuando una temperatura fluctúa cerca del límite.
 
 **Por qué OR para subir y AND para bajar:** subir a modo max es una medida
 de protección térmica, así que basta con que un solo componente (CPU o GPU)
-se caliente para justificarla. Bajar a modo normal, en cambio, solo debe
-ocurrir cuando **todo** el sistema ya se enfrió; si se bajara con que un solo
-componente estuviera frío, el otro podría seguir caliente sin refrigeración
-adecuada. Esta asimetría es una decisión de diseño explícita, documentada
+supere su propio límite para justificarla. Bajar a modo normal, en cambio,
+solo debe ocurrir cuando **todo** el sistema ya se enfrió; si se bajara con
+que un solo componente estuviera frío, el otro podría seguir caliente sin
+refrigeración adecuada. Esta asimetría es una decisión de diseño explícita, documentada
 también en `AGENT.md`, y no debe cambiarse a menos que el usuario lo pida.
 
 El EC permanece siempre en `platform_profile=custom`. Cambiar de modo es
@@ -93,9 +95,11 @@ Editar las constantes al principio de `legion-fan-auto.sh` (en el destino
 instalado, `/usr/local/bin/legion-fan-auto.sh`):
 
 ```bash
-TEMP_ON=66000    # miligrados = 66°C -> activa modo max si CPU o GPU lo supera
-TEMP_OFF=55000   # miligrados = 55°C -> vuelve a modo normal si CPU y GPU bajan de esto
-POLL_INTERVAL=5  # segundos entre lecturas
+CPU_TEMP_ON=70000   # miligrados = 70°C -> activa modo max si la CPU lo supera
+GPU_TEMP_ON=64000   # miligrados = 64°C -> activa modo max si la GPU lo supera
+CPU_TEMP_OFF=62000  # miligrados = 62°C -> la CPU debe bajar de esto para volver a normal
+GPU_TEMP_OFF=60000  # miligrados = 60°C -> la GPU debe bajar de esto para volver a normal
+POLL_INTERVAL=5     # segundos entre lecturas
 ```
 
 También se pueden ajustar las curvas editando `max-fan.yaml` y

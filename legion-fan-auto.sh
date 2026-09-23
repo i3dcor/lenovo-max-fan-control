@@ -7,8 +7,10 @@ GPU_TEMP_FILE="$HWMON/temp2_input"
 MAX_CURVE="/etc/legion_linux/max-fan.yaml"
 NORMAL_CURVE="/etc/legion_linux/normal-fan.yaml"
 PROFILE_FILE="/sys/firmware/acpi/platform_profile"
-TEMP_ON=66000
-TEMP_OFF=55000
+CPU_TEMP_ON=70000
+GPU_TEMP_ON=64000
+CPU_TEMP_OFF=62000
+GPU_TEMP_OFF=60000
 POLL_INTERVAL=5
 
 # Writing the platform profile goes straight to the EC through legion_laptop.
@@ -48,10 +50,10 @@ state="normal"
 while true; do
 	cpu_temp=$(cat "$CPU_TEMP_FILE")
 	gpu_temp=$(cat "$GPU_TEMP_FILE")
-	if [[ "$state" == "normal" && ( "$cpu_temp" -ge "$TEMP_ON" || "$gpu_temp" -ge "$TEMP_ON" ) ]]; then
+	if [[ "$state" == "normal" && ( "$cpu_temp" -gt "$CPU_TEMP_ON" || "$gpu_temp" -gt "$GPU_TEMP_ON" ) ]]; then
 		set_max
 		state="max"
-	elif [[ "$state" == "max" && "$cpu_temp" -le "$TEMP_OFF" && "$gpu_temp" -le "$TEMP_OFF" ]]; then
+	elif [[ "$state" == "max" && "$cpu_temp" -lt "$CPU_TEMP_OFF" && "$gpu_temp" -lt "$GPU_TEMP_OFF" ]]; then
 		set_normal
 		state="normal"
 	fi
