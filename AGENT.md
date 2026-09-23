@@ -53,6 +53,14 @@ Implementado en `legion-fan-auto.sh` mediante `CPU_TEMP_ON` / `GPU_TEMP_ON` /
   reposo.
 - No reintroducir escrituras de `platform_profile` en el bucle principal sin
   instrucción explícita del usuario.
+- **`power-profiles-daemon` debe seguir enmascarado.** Su `PlatformDriver` es
+  `platform_profile`, así que es un segundo escritor del mismo fichero al que
+  ni el daemon ni el hook pueden imponer la norma de arriba: reaplica
+  `balanced` en resume, cambio AC↔batería y peticiones D-Bus del escritorio.
+  Además su estado se desincroniza en cuanto el daemon escribe `custom`, así
+  que sus reaplicaciones son escrituras reales, no no-ops. Lo mismo aplica a
+  `tuned`. Si alguno aparece activo, enmascararlo antes de dar por buena
+  cualquier conclusión sobre apagados.
 
 ## Norma: el hook de suspensión solo escribe `balanced` una vez por boot
 

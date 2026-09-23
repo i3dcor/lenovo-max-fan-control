@@ -30,6 +30,12 @@ Probado en CachyOS (Arch) con kernel 7.2.4-3-cachyos, BIOS GKCN65WW, vía el mó
    sudo cat /sys/kernel/debug/legion/fancurve
    ```
    Debe mostrar `EC Chip ID: 8227` y una tabla de curva no vacía.
+4. Enmascarar `power-profiles-daemon`, que es un segundo escritor de
+   `platform_profile` (ver `## Notas / limitaciones`):
+   ```bash
+   sudo systemctl stop power-profiles-daemon
+   sudo systemctl mask power-profiles-daemon
+   ```
 
 ## Instalación
 
@@ -218,6 +224,29 @@ sudo legion_cli set-feature PlatformProfileFeature balanced
   `legion_cli set-feature PlatformProfileFeature` escribe en
   `.../platform-profile-N/profile` del driver, o sea el mismo camino EC/WMI que
   el sysfs del kernel: cambiar de interfaz no evita el problema.
+- **`power-profiles-daemon` debe estar enmascarado.** Su `PlatformDriver` es
+  `platform_profile`, así que escribe el mismo fichero, fuera del control del
+  daemon y del hook de sleep. Reaplica su perfil en eventos que no controlamos
+  (resume, cambio AC↔batería, peticiones D-Bus del escritorio) y el valor que
+  escribe es `balanced`, justo el patrón fatal. Además queda desincronizado en
+  cuanto el daemon escribe `custom`: `powerprofilesctl get` sigue devolviendo
+  `balanced` mientras el kernel está en `custom`, así que cualquier
+  reaplicación suya es una escritura real, no un no-op.
+
+  ```bash
+  sudo systemctl stop power-profiles-daemon
+  sudo systemctl mask power-profiles-daemon
+  ```
+
+  No está demostrado que ppd emitiera ninguna de las dos escrituras fatales
+  registradas —ambas llevan el tag del daemon en el journal—, pero estaba
+  activo en los dos boots que murieron, y mientras corra la premisa "el perfil
+  se escribe una sola vez" es falsa. `tuned` causa el mismo problema si se
+  instala; mantenerlo inactivo.
+
+  Efecto secundario: el selector de perfil de energía del escritorio
+  (GNOME/KDE) deja de funcionar al quedarse sin backend. Revertir con
+  `sudo systemctl unmask power-profiles-daemon`.
 - Cambiar a `platform_profile=custom` resetea momentáneamente la curva en el
   EC; escribir la curva sin pausa justo después dejaba filas a medias (el
   ventilador se quedaba en ~3000 RPM en vez de 4500). Por eso el daemon espera
