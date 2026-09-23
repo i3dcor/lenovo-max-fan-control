@@ -12,7 +12,7 @@ Probado en CachyOS (Arch) con kernel 7.2.4-3-cachyos, BIOS GKCN65WW, vía el mó
 |---|---|---|
 | `legion-fan-auto.sh` | `/usr/local/bin/legion-fan-auto.sh` | Loop que lee la temperatura de CPU y GPU y cambia de perfil |
 | `legion-fan-auto.service` | `/etc/systemd/system/legion-fan-auto.service` | Unit de systemd que mantiene el script corriendo |
-| `legion-fan-auto-sleep-hook.sh` | `/usr/lib/systemd/system-sleep/legion-fan-auto` | Devuelve el EC a `balanced` y para el daemon antes de suspender |
+| `legion-fan-auto-sleep-hook.sh` | `/usr/lib/systemd/system-sleep/legion-fan-auto` | Para el daemon antes de suspender y, solo en la primera suspensión del boot, devuelve el EC a `balanced` |
 | `max-fan.yaml` | `/etc/legion_linux/max-fan.yaml` | Curva de ventilador fija a 4500 RPM (techo real de hardware de este modelo) en todos los puntos de temperatura |
 | `normal-fan.yaml` | `/etc/legion_linux/normal-fan.yaml` | Curva moderada para el modo normal: 0 RPM en reposo, escalando hasta 4500 RPM si la temperatura se dispara |
 
@@ -148,20 +148,33 @@ sudo legion_cli set-feature PlatformProfileFeature balanced
   unidad, no el máximo alcanzable por el hardware).
 - No dejar el modo máximo corriendo permanentemente sin necesidad: acelera el
   desgaste de los ventiladores.
-- **Escribir `platform_profile` puede apagar el equipo en seco.** Es la causa
-  real de los apagados espontáneos, no la curva ni el piso de RPM. Tres
-  apagados confirmados, todos con el mismo último registro antes del corte:
-  `kernel: legion_laptop: Set powermode`, sin secuencia de shutdown, sin MCE
-  y sin thermal critical.
+- **Escribir `platform_profile=balanced` después de un resume apaga el equipo
+  en seco.** Es la causa real de los apagados espontáneos, no la curva ni el
+  piso de RPM. Los dos apagados confirmados comparten el mismo último registro
+  antes del corte: `kernel: legion_laptop: Set powermode`, sin secuencia de
+  shutdown, sin MCE y sin thermal critical.
 
-  Los dos primeros fueron escrituras posteriores a un resume de S3 (a los
-  1.1 s y a los 40 ms). El tercero descartó la hipótesis de que el problema
-  fuera exclusivo del post-resume: fue una transición legítima
-  `custom` → `balanced` a mitad de sesión, 11 minutos después del resume,
-  y mató la máquina 56 s más tarde.
+  Evidencia completa de escrituras de perfil registradas en el journal:
 
-  Conclusión: **ninguna** escritura de `platform_profile` es fiable con el
-  daemon en marcha. Tres defensas en el código, no quitar ninguna:
+  | Boot | Hora | ¿Tras un resume? | Valor | Resultado |
+  |---|---|---|---|---|
+  | -2 | 07:47:00 | sí (62 s antes) | `balanced` | **muerte a los 40 ms** |
+  | -1 | 08:22:49 | no | `custom` | sobrevivió |
+  | -1 | 08:28:36 | no | `balanced` | sobrevivió |
+  | -1 | 08:35:58 | sí (3 min antes) | `custom` | sobrevivió 12 min más |
+  | -1 | 08:47:30 | sí (15 min antes) | `balanced` | **muerte a los 56 s** |
+
+  El patrón no es "cualquier escritura de perfil tras un resume". Es más
+  concreto: **`balanced` tras un resume**. Escribir `custom` tras un resume se
+  observó una vez y sobrevivió, y antes de la primera suspensión del boot
+  cualquier valor ha sido inocuo.
+
+  **No se conoce el mecanismo.** La muestra es pequeña (una sola observación
+  del caso `custom` post-resume), así que el patrón es una correlación bien
+  soportada, no una explicación demostrada. Tratar `balanced` post-resume como
+  fatal y no fiarse de extrapolaciones.
+
+  Tres defensas en el código, no quitar ninguna:
   1. El perfil se escribe a `custom` **una sola vez**, al arrancar el daemon.
      El bucle nunca vuelve a tocarlo: normal y max son solo curvas distintas
      escritas con `fancurve-write-file-to-hw`, que jamás ha provocado un
@@ -169,9 +182,12 @@ sudo legion_cli set-feature PlatformProfileFeature balanced
   2. `write_profile()` lee `/sys/firmware/acpi/platform_profile` y no escribe
      si el perfil ya es el deseado. Una escritura redundante **no** es un
      no-op a nivel de EC.
-  3. El hook de `systemd-sleep` vuelve a `balanced` mientras todavía es seguro
-     escribir (antes de S3) y para el daemon. **No** se rearranca solo al
-     despertar; hay que arrancarlo a mano, idealmente tras reiniciar.
+  3. El hook de `systemd-sleep` solo devuelve el EC a `balanced` en la
+     **primera** suspensión del boot. Si el boot ya resumió alguna vez, marca
+     `/run/legion-fan-auto.resumed` y deja el EC en `custom`, que sigue siendo
+     térmicamente seguro porque `normal-fan.yaml` sube hasta 4500 RPM por sí
+     solo. El daemon **no** se rearranca al despertar; hay que arrancarlo a
+     mano.
 
   `legion_cli set-feature PlatformProfileFeature` escribe en
   `.../platform-profile-N/profile` del driver, o sea el mismo camino EC/WMI que

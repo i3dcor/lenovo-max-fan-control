@@ -14,9 +14,11 @@ GPU_TEMP_OFF=60000
 POLL_INTERVAL=5
 
 # Writing the platform profile goes straight to the EC through legion_laptop.
-# Two hard poweroffs were traced to that write: once as a redundant write
-# right after an S3 resume, once as a genuine custom->balanced transition
-# mid-session. So platform_profile is written to custom exactly once, at
+# Both hard poweroffs on record were writes of "balanced" after an S3 resume,
+# 40ms and 56s after the write. Writing "custom" after a resume survived, and
+# any value before the first suspend of a boot has been harmless. The
+# mechanism is unknown and the sample is small, so the daemon avoids the
+# pattern entirely: platform_profile is written to custom exactly once, at
 # startup, and never touched again; normal vs max is a fan-curve swap only
 # (fancurve-write-file-to-hw), which has never been observed to crash the EC.
 write_profile() {

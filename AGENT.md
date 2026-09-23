@@ -36,12 +36,14 @@ Implementado en `legion-fan-auto.sh` mediante `CPU_TEMP_ON` / `GPU_TEMP_ON` /
 - Cambiar entre modo normal y modo max es **solo** un cambio de curva con
   `fancurve-write-file-to-hw`: `normal-fan.yaml` y `max-fan.yaml`. Esa
   operación nunca ha provocado un apagado.
-- Motivo: se confirmó un tercer apagado en seco durante una transición
-  legítima `custom` → `balanced` a mitad de sesión (11 min después del resume,
-  muerte 56 s después de la escritura). Eso **descarta** la hipótesis anterior
-  de que el problema fuera exclusivo de las escrituras post-resume o
-  redundantes. Cualquier escritura de perfil con el daemon en marcha es
-  insegura.
+- Motivo: los dos apagados en seco confirmados fueron escrituras de
+  `balanced` **después de un resume** (muerte a los 40 ms y a los 56 s). En
+  cambio, escribir `custom` después de un resume se observó una vez y
+  sobrevivió, y antes de la primera suspensión del boot cualquier valor ha
+  sido inocuo. El daemon ya no escribe `balanced` nunca, así que el ciclo
+  normal/max queda fuera del patrón peligroso.
+- El mecanismo **no se conoce** y la muestra es pequeña. No extrapolar más
+  allá de lo observado ni relajar las defensas por comodidad.
 - **Corrección de una hipótesis previa:** la norma anterior culpaba de los
   apagados a *mantener* `custom` de forma continua (vía `min-fan.yaml`). Es
   falso. La evidencia apunta a la *escritura* del perfil, no al estado. Por
@@ -51,6 +53,18 @@ Implementado en `legion-fan-auto.sh` mediante `CPU_TEMP_ON` / `GPU_TEMP_ON` /
   reposo.
 - No reintroducir escrituras de `platform_profile` en el bucle principal sin
   instrucción explícita del usuario.
+
+## Norma: el hook de suspensión solo escribe `balanced` una vez por boot
+
+- `legion-fan-auto-sleep-hook.sh` marca `/run/legion-fan-auto.resumed` en
+  **cada** resume, incluso si el daemon no estaba corriendo.
+- En `pre`, si ese marcador existe, el hook **no** escribe `balanced`: para el
+  daemon y deja el EC en `custom`. Escribir `balanced` ahí sería exactamente
+  el patrón que mató la máquina dos veces.
+- `/run` es tmpfs, así que el marcador desaparece al reiniciar y la primera
+  suspensión de cada boot vuelve a devolver el EC a `balanced`.
+- Dejar el EC en `custom` durante la suspensión es térmicamente seguro:
+  `normal-fan.yaml` escala hasta 4500 RPM sin necesidad del daemon.
 
 ## Norma: activación manual únicamente
 
