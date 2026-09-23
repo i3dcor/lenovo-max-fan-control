@@ -15,6 +15,7 @@ Probado en CachyOS (Arch) con kernel 7.2.4-3-cachyos, BIOS GKCN65WW, vía el mó
 | `legion-fan-auto-sleep-hook.sh` | `/usr/lib/systemd/system-sleep/legion-fan-auto` | Para el daemon antes de suspender y, solo en la primera suspensión del boot, devuelve el EC a `balanced` |
 | `max-fan.yaml` | `/etc/legion_linux/max-fan.yaml` | Curva de ventilador fija a 4500 RPM (techo real de hardware de este modelo) en todos los puntos de temperatura |
 | `normal-fan.yaml` | `/etc/legion_linux/normal-fan.yaml` | Curva moderada para el modo normal: 0 RPM en reposo, escalando hasta 4500 RPM si la temperatura se dispara |
+| `legion-fan-status.sh` | (se ejecuta desde el repo) | Estado de solo lectura: servicio, perfil del EC, curva cargada, si el boot ya resumió, y RPM/temperaturas |
 
 ## Requisitos previos
 
@@ -112,6 +113,31 @@ sudo systemctl restart legion-fan-auto.service
 ```
 
 ## Operación
+
+### Ver el estado actual
+
+```bash
+./legion-fan-status.sh
+```
+
+Salida de ejemplo:
+
+```
+servicio : inactive
+perfil   : balanced
+curva    : desconocida (sin cambios de curva en el log reciente)
+resume   : sin resumes en este boot -> la próxima suspensión devolverá el EC a 'balanced'
+
+Fan 1:           2321 RPM  (max = 10000 RPM)
+Fan 2:           2453 RPM  (max = 10000 RPM)
+CPU Temperature:  +63.0°C
+```
+
+Con el servicio `active` el perfil debe ser `custom`; el script avisa si no lo
+es. La curva cargada no se puede leer de sysfs, así que se deduce del log del
+daemon (`switched to MAX curve` / `switched to NORMAL curve`).
+
+### Otros comandos
 
 ```bash
 # activar el daemon (solo cuando el usuario lo pida explícitamente)
