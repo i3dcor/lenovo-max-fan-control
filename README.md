@@ -1,7 +1,7 @@
 # legion-fan-auto
 
 Daemon que fuerza los ventiladores del Lenovo Legion 5 Pro 16ACH6H (82JQ) al máximo
-cuando la CPU se calienta, y los devuelve al control normal del firmware cuando se enfría.
+cuando la CPU se calienta, y los devuelve a una curva moderada cuando se enfría.
 
 Probado en CachyOS (Arch) con kernel 7.2.4-3-cachyos, BIOS GKCN65WW, vía el módulo
 `legion-laptop` del proyecto [LenovoLegionLinux](https://github.com/johnfanv2/LenovoLegionLinux).
@@ -14,6 +14,7 @@ Probado en CachyOS (Arch) con kernel 7.2.4-3-cachyos, BIOS GKCN65WW, vía el mó
 | `legion-fan-auto.service` | `/etc/systemd/system/legion-fan-auto.service` | Unit de systemd que mantiene el script corriendo |
 | `legion-fan-auto-sleep-hook.sh` | `/usr/lib/systemd/system-sleep/legion-fan-auto` | Devuelve el EC a `balanced` y para el daemon antes de suspender |
 | `max-fan.yaml` | `/etc/legion_linux/max-fan.yaml` | Curva de ventilador fija a 4500 RPM (techo real de hardware de este modelo) en todos los puntos de temperatura |
+| `normal-fan.yaml` | `/etc/legion_linux/normal-fan.yaml` | Curva moderada para el modo normal: 0 RPM en reposo, escalando hasta 4500 RPM si la temperatura se dispara |
 
 ## Requisitos previos
 
@@ -33,6 +34,7 @@ Probado en CachyOS (Arch) con kernel 7.2.4-3-cachyos, BIOS GKCN65WW, vía el mó
 
 ```bash
 sudo install -m 644 -D max-fan.yaml /etc/legion_linux/max-fan.yaml
+sudo install -m 644 -D normal-fan.yaml /etc/legion_linux/normal-fan.yaml
 sudo install -m 755 legion-fan-auto.sh /usr/local/bin/legion-fan-auto.sh
 sudo install -m 644 legion-fan-auto.service /etc/systemd/system/legion-fan-auto.service
 sudo install -m 755 legion-fan-auto-sleep-hook.sh /usr/lib/systemd/system-sleep/legion-fan-auto
@@ -49,17 +51,16 @@ El script lee cada 5 segundos la temperatura de CPU y GPU desde
 `/sys/class/hwmon/hwmonX/temp1_input` y `temp2_input` (hwmon `legion_hwmon`,
 en miligrados).
 
-- **Al arrancar el daemon** → modo **normal**: pone `platform_profile=balanced`
-  y deja que el firmware controle la curva de ventiladores libremente (sin
-  piso mínimo forzado).
+- **Al arrancar el daemon** → escribe `platform_profile=custom` **una sola
+  vez** y carga `normal-fan.yaml`. A partir de ahí el perfil no se vuelve a
+  tocar nunca (ver `## Notas / limitaciones`).
 - **CPU ≥ 66°C O GPU ≥ 66°C** → modo **max**: basta con que una sola de las
   dos temperaturas supere el límite superior para que ambos ventiladores
-  pasen a `platform_profile=custom` + `max-fan.yaml` (4500 RPM fijo en todo
-  el rango).
+  pasen a `max-fan.yaml` (4500 RPM fijo en todo el rango).
 - **CPU ≤ 55°C Y GPU ≤ 55°C** (viniendo de modo max) → vuelve a modo
-  **normal** (`platform_profile=balanced`, control del firmware). Se necesita
-  que **ambas** temperaturas bajen del límite inferior; si una sola sigue por
-  encima de 55°C, el modo max se mantiene.
+  **normal** recargando `normal-fan.yaml`. Se necesita que **ambas**
+  temperaturas bajen del límite inferior; si una sola sigue por encima de
+  55°C, el modo max se mantiene.
 - Entre 55°C y 66°C (para la temperatura que disparó el cambio) se mantiene
   el modo activo (histéresis, evita que el ventilador oscile entre modos).
 
@@ -71,14 +72,20 @@ componente estuviera frío, el otro podría seguir caliente sin refrigeración
 adecuada. Esta asimetría es una decisión de diseño explícita, documentada
 también en `AGENT.md`, y no debe cambiarse a menos que el usuario lo pida.
 
-`platform_profile=custom` solo se usa en modo max, para forzar la curva fija
-de `max-fan.yaml`. En modo normal se usa `platform_profile=balanced`, que deja
-el control de la curva al firmware/EC sin ningún piso de RPM impuesto por este
-script.
+El EC permanece siempre en `platform_profile=custom`. Cambiar de modo es
+**solo** un cambio de curva (`fancurve-write-file-to-hw`), nunca una escritura
+de perfil. Esto es deliberado y crítico: la escritura de `platform_profile` es
+la causa confirmada de los apagados en seco (ver `## Notas / limitaciones`).
 
-**Nota histórica:** se probó un piso permanente de 3000 RPM (modo normal con
-`platform_profile=custom` + `min-fan.yaml`), pero causó apagados espontáneos
-del portátil. Se revirtió; ver `AGENT.md`.
+Permanecer en `custom` **no** impone un piso de RPM: la primera fila de
+`normal-fan.yaml` es 0 RPM, así que en reposo los ventiladores pueden pararse
+igual que bajo control del firmware.
+
+**Nota histórica:** se probó un piso permanente de 3000 RPM vía `min-fan.yaml`
+y se atribuyeron a él unos apagados espontáneos. Esa atribución resultó ser
+incorrecta: la causa real era la escritura de `platform_profile`. Aun así el
+piso de RPM no se reintrodujo, porque no aporta nada frente a una curva normal
+que arranca en 0 RPM.
 
 ## Ajustar umbrales
 
@@ -90,6 +97,9 @@ TEMP_ON=66000    # miligrados = 66°C -> activa modo max si CPU o GPU lo supera
 TEMP_OFF=55000   # miligrados = 55°C -> vuelve a modo normal si CPU y GPU bajan de esto
 POLL_INTERVAL=5  # segundos entre lecturas
 ```
+
+También se pueden ajustar las curvas editando `max-fan.yaml` y
+`normal-fan.yaml` y reinstalándolas en `/etc/legion_linux/`.
 
 Después de editar, reiniciar el servicio:
 
@@ -112,9 +122,11 @@ sensors | grep -A5 legion_hwmon
 # desactivar (siempre al terminar, no queda corriendo en background)
 sudo systemctl stop legion-fan-auto.service
 
-# volver a control manual: forzar modo max/normal a mano
-sudo legion_cli set-feature PlatformProfileFeature custom
+# forzar una curva a mano (con el daemon parado)
 sudo legion_cli fancurve-write-file-to-hw /etc/legion_linux/max-fan.yaml
+sudo legion_cli fancurve-write-file-to-hw /etc/legion_linux/normal-fan.yaml
+
+# devolver el control al firmware (solo si el daemon está parado)
 sudo legion_cli set-feature PlatformProfileFeature balanced
 ```
 
@@ -132,20 +144,28 @@ sudo legion_cli set-feature PlatformProfileFeature balanced
   unidad, no el máximo alcanzable por el hardware).
 - No dejar el modo máximo corriendo permanentemente sin necesidad: acelera el
   desgaste de los ventiladores.
-- **Escribir `platform_profile` después de un resume de S3 apaga el equipo en
-  seco.** Es la causa real de los apagados espontáneos, no la curva ni el piso
-  de RPM. Evidencia en el journal: las 6 escrituras del boot `-2` previas a
-  cualquier suspend fueron inocuas, mientras que las dos únicas escrituras
-  posteriores a un resume mataron la máquina a los 1.1 s y a los 40 ms
-  respectivamente, sin secuencia de shutdown, sin MCE y sin thermal critical.
-  El último registro antes del corte es siempre `kernel: legion_laptop: Set
-  powermode`.
+- **Escribir `platform_profile` puede apagar el equipo en seco.** Es la causa
+  real de los apagados espontáneos, no la curva ni el piso de RPM. Tres
+  apagados confirmados, todos con el mismo último registro antes del corte:
+  `kernel: legion_laptop: Set powermode`, sin secuencia de shutdown, sin MCE
+  y sin thermal critical.
 
-  Dos defensas en el código, no quitar ninguna:
-  1. `write_profile()` lee `/sys/firmware/acpi/platform_profile` y no escribe
+  Los dos primeros fueron escrituras posteriores a un resume de S3 (a los
+  1.1 s y a los 40 ms). El tercero descartó la hipótesis de que el problema
+  fuera exclusivo del post-resume: fue una transición legítima
+  `custom` → `balanced` a mitad de sesión, 11 minutos después del resume,
+  y mató la máquina 56 s más tarde.
+
+  Conclusión: **ninguna** escritura de `platform_profile` es fiable con el
+  daemon en marcha. Tres defensas en el código, no quitar ninguna:
+  1. El perfil se escribe a `custom` **una sola vez**, al arrancar el daemon.
+     El bucle nunca vuelve a tocarlo: normal y max son solo curvas distintas
+     escritas con `fancurve-write-file-to-hw`, que jamás ha provocado un
+     apagado.
+  2. `write_profile()` lee `/sys/firmware/acpi/platform_profile` y no escribe
      si el perfil ya es el deseado. Una escritura redundante **no** es un
-     no-op a nivel de EC: es la que mataba el equipo al arrancar el servicio.
-  2. El hook de `systemd-sleep` vuelve a `balanced` mientras todavía es seguro
+     no-op a nivel de EC.
+  3. El hook de `systemd-sleep` vuelve a `balanced` mientras todavía es seguro
      escribir (antes de S3) y para el daemon. **No** se rearranca solo al
      despertar; hay que arrancarlo a mano, idealmente tras reiniciar.
 
@@ -154,5 +174,6 @@ sudo legion_cli set-feature PlatformProfileFeature balanced
   el sysfs del kernel: cambiar de interfaz no evita el problema.
 - Cambiar a `platform_profile=custom` resetea momentáneamente la curva en el
   EC; escribir la curva sin pausa justo después dejaba filas a medias (el
-  ventilador se quedaba en ~3000 RPM en vez de 4500). Por eso `set_max()`
-  espera 1s antes de escribir `max-fan.yaml`; no quitar esa pausa.
+  ventilador se quedaba en ~3000 RPM en vez de 4500). Por eso el daemon espera
+  1s tras la escritura inicial del perfil, antes de cargar la primera curva;
+  no quitar esa pausa.

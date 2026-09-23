@@ -22,20 +22,29 @@ Implementado en `legion-fan-auto.sh` mediante `TEMP_ON=66000` / `TEMP_OFF=55000`
 (miligrados) y lectura de `temp1_input` (CPU) y `temp2_input` (GPU) del hwmon
 `legion_hwmon`.
 
-## Norma: sin piso mínimo de RPM (revertido 2026-09-21)
+## Norma: el EC se queda siempre en `custom` (2026-09-23)
 
-- Se probó imponer un piso de 3000 RPM permanente vía `platform_profile=custom`
-  + `min-fan.yaml`, pero causó apagados espontáneos del portátil (posible
-  conflicto con el EC al mantener `custom` de forma continua). El usuario
-  restauró un snapshot y pidió revertir este cambio.
-- **Modo normal ahora es `platform_profile=balanced`**: el firmware controla
-  la curva de ventiladores libremente por debajo del límite superior de
-  temperatura, sin piso forzado.
-- **Modo max sigue siendo `platform_profile=custom` + `max-fan.yaml`**
-  (ventiladores fijos a 4500 RPM) y solo se activa cuando CPU o GPU superan
-  el límite superior.
-- No reintroducir el piso de RPM ni `min-fan.yaml` sin instrucción explícita
-  del usuario.
+- **`platform_profile` se escribe exactamente una vez**, al arrancar el
+  daemon, para poner el EC en `custom`. El bucle principal **nunca** vuelve a
+  escribirlo.
+- Cambiar entre modo normal y modo max es **solo** un cambio de curva con
+  `fancurve-write-file-to-hw`: `normal-fan.yaml` y `max-fan.yaml`. Esa
+  operación nunca ha provocado un apagado.
+- Motivo: se confirmó un tercer apagado en seco durante una transición
+  legítima `custom` → `balanced` a mitad de sesión (11 min después del resume,
+  muerte 56 s después de la escritura). Eso **descarta** la hipótesis anterior
+  de que el problema fuera exclusivo de las escrituras post-resume o
+  redundantes. Cualquier escritura de perfil con el daemon en marcha es
+  insegura.
+- **Corrección de una hipótesis previa:** la norma anterior culpaba de los
+  apagados a *mantener* `custom` de forma continua (vía `min-fan.yaml`). Es
+  falso. La evidencia apunta a la *escritura* del perfil, no al estado. Por
+  eso ahora se mantiene `custom` de forma permanente a propósito.
+- Permanecer en `custom` no impone piso de RPM: la primera fila de
+  `normal-fan.yaml` es 0 RPM, así que los ventiladores pueden pararse en
+  reposo.
+- No reintroducir escrituras de `platform_profile` en el bucle principal sin
+  instrucción explícita del usuario.
 
 ## Norma: activación manual únicamente
 
@@ -55,15 +64,14 @@ Implementado en `legion-fan-auto.sh` mediante `TEMP_ON=66000` / `TEMP_OFF=55000`
   inmediatamente después, la escritura llega incompleta (algunas filas quedan
   en 0 o con el valor anterior), y el ventilador nunca alcanza el máximo real
   (verificado: se quedaba en ~3000 RPM en vez de 4500).
-- `set_max()` en `legion-fan-auto.sh` debe mantener `sleep 1` entre
-  `set-feature PlatformProfileFeature custom` y
-  `fancurve-write-file-to-hw "$MAX_CURVE"`. No quitar esta pausa.
+- `legion-fan-auto.sh` debe mantener el `sleep 1` entre la escritura inicial
+  de `set-feature PlatformProfileFeature custom` y la primera llamada a
+  `fancurve-write-file-to-hw`. No quitar esta pausa.
 
 ## Al modificar este proyecto
 
 - Si se cambian los umbrales o la lógica CPU/GPU, actualizar esta norma en
   `AGENT.md`, el bloque `## Cómo funciona` de `README.md`, y las constantes
-  `TEMP_ON`/`TEMP_OFF` en `legion-fan-auto.sh` de forma consistente entre
-  los tres.
+  de umbral en `legion-fan-auto.sh` de forma consistente entre los tres.
 - No revertir la lógica OR-para-subir / AND-para-bajar sin instrucción
   explícita del usuario: es una decisión de diseño, no un valor por defecto.

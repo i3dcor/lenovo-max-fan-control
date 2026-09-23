@@ -5,15 +5,18 @@ HWMON=$(dirname "$(grep -l legion_hwmon /sys/class/hwmon/hwmon*/name)")
 CPU_TEMP_FILE="$HWMON/temp1_input"
 GPU_TEMP_FILE="$HWMON/temp2_input"
 MAX_CURVE="/etc/legion_linux/max-fan.yaml"
+NORMAL_CURVE="/etc/legion_linux/normal-fan.yaml"
 PROFILE_FILE="/sys/firmware/acpi/platform_profile"
 TEMP_ON=66000
 TEMP_OFF=55000
 POLL_INTERVAL=5
 
 # Writing the platform profile goes straight to the EC through legion_laptop.
-# A redundant write is not a no-op at that level: after an S3 resume it has
-# hard-powered the machine off within milliseconds. Never write a profile the
-# EC already reports.
+# Two hard poweroffs were traced to that write: once as a redundant write
+# right after an S3 resume, once as a genuine custom->balanced transition
+# mid-session. So platform_profile is written to custom exactly once, at
+# startup, and never touched again; normal vs max is a fan-curve swap only
+# (fancurve-write-file-to-hw), which has never been observed to crash the EC.
 write_profile() {
 	local target=$1
 	if [[ "$(cat "$PROFILE_FILE")" == "$target" ]]; then
@@ -23,22 +26,20 @@ write_profile() {
 	return 0
 }
 
+if write_profile custom; then
+	# switching to custom momentarily resets the curve in the EC; without
+	# this pause the next write lands half-applied (some rows stay at 0)
+	sleep 1
+fi
+
 set_max() {
-	if write_profile custom; then
-		# switching to custom momentarily resets the curve in the EC; without
-		# this pause the next write lands half-applied (some rows stay at 0)
-		sleep 1
-	fi
 	legion_cli fancurve-write-file-to-hw "$MAX_CURVE" >/dev/null
-	logger -t legion-fan-auto "switched to MAX mode"
+	logger -t legion-fan-auto "switched to MAX curve"
 }
 
 set_normal() {
-	if write_profile balanced; then
-		logger -t legion-fan-auto "switched to NORMAL mode (firmware control)"
-	else
-		logger -t legion-fan-auto "already in NORMAL mode, no EC write"
-	fi
+	legion_cli fancurve-write-file-to-hw "$NORMAL_CURVE" >/dev/null
+	logger -t legion-fan-auto "switched to NORMAL curve"
 }
 
 set_normal
